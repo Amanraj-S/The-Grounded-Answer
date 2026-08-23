@@ -18,9 +18,16 @@ class PolicyDateExtractor:
     """
     Extracts dates from policy questions.
 
-    The extractor uses the language immediately associated
-    with each date to determine whether it is a change date
-    or a determination date.
+    The extractor uses the language associated with each date
+    to determine whether it is a change date or a determination
+    date.
+
+    Supported examples:
+
+        My income changed on 10 March 2026.
+        The Department made my determination on 5 March 2026.
+        The Department determined my claim on 5 March 2026.
+        The determination was made on 5 March 2026.
     """
 
     MONTHS = {
@@ -38,68 +45,80 @@ class PolicyDateExtractor:
         "december": 12,
     }
 
+    # =========================================================
+    # Generic date pattern
+    # =========================================================
+
+    DATE_TEXT = (
+        r"\d{1,2}"
+        r"(?:st|nd|rd|th)?\s+"
+        r"(?:January|February|March|April|May|June|"
+        r"July|August|September|October|November|December)"
+        r"\s+\d{4}"
+    )
+
     DATE_PATTERN = re.compile(
-        r"\b"
-        r"(?P<day>\d{1,2})"
-        r"(?:st|nd|rd|th)?"
-        r"\s+"
-        r"(?P<month>January|February|March|April|May|June|"
-        r"July|August|September|October|November|December)"
-        r"\s+"
-        r"(?P<year>\d{4})"
-        r"\b",
+        rf"\b(?P<date>{DATE_TEXT})\b",
         re.IGNORECASE,
     )
 
-    # Phrases that specifically indicate a change date.
+    # =========================================================
+    # Change-date patterns
+    # =========================================================
+
     CHANGE_PATTERN = re.compile(
-        r"(?:"
-        r"change(?:d)?"
-        r"|income changed"
-        r"|salary changed"
-        r"|circumstance changed"
-        r"|job changed"
-        r"|address changed"
+        rf"(?:"
+        r"\bchange(?:d)?\b"
+        r"|\bincome\s+changed\b"
+        r"|\bsalary\s+changed\b"
+        r"|\bcircumstance(?:s)?\s+changed\b"
+        r"|\bjob\s+changed\b"
+        r"|\baddress\s+changed\b"
+        r"|\bchange\s+of\s+circumstances\b"
         r")"
-        r".{0,40}?"
-        r"(?P<date>\d{1,2}"
-        r"(?:st|nd|rd|th)?\s+"
-        r"(?:January|February|March|April|May|June|"
-        r"July|August|September|October|November|December)"
-        r"\s+\d{4})",
+        rf".{{0,60}}?"
+        rf"(?P<date>{DATE_TEXT})",
         re.IGNORECASE,
     )
 
-    # Phrases that specifically indicate a determination date.
+    # =========================================================
+    # Determination-date patterns
+    # =========================================================
+
     DETERMINATION_PATTERN = re.compile(
-        r"(?:"
-        r"Department determined"
-        r"|Department made the determination"
-        r"|determination was made"
-        r"|claim was determined"
-        r"|official determination"
-        r"|official decision"
-        r"|Department decided"
+        rf"(?:"
+        r"\bDepartment\s+determined\b"
+        r"|\bDepartment\s+made\s+(?:the\s+)?(?:my\s+)?determination\b"
+        r"|\bDepartment\s+made\s+(?:the\s+)?determination\s+of\b"
+        r"|\bdetermination\s+was\s+made\b"
+        r"|\bclaim\s+was\s+determined\b"
+        r"|\bofficial\s+determination\b"
+        r"|\bofficial\s+decision\b"
+        r"|\bDepartment\s+decided\b"
+        r"|\bdetermination\s+date\b"
         r")"
-        r".{0,60}?"
-        r"(?P<date>\d{1,2}"
-        r"(?:st|nd|rd|th)?\s+"
-        r"(?:January|February|March|April|May|June|"
-        r"July|August|September|October|November|December)"
-        r"\s+\d{4})",
+        rf".{{0,60}}?"
+        rf"(?P<date>{DATE_TEXT})",
         re.IGNORECASE,
     )
 
     def extract(
         self,
-        question: str
+        question: str,
     ) -> ExtractedDates:
+        """
+        Extract change and determination dates.
+
+        The extractor does not guess the meaning of an
+        unrelated date. It only assigns a date when the
+        surrounding language identifies its purpose.
+        """
 
         result = ExtractedDates()
 
-        # -----------------------------------------
-        # 1. Look specifically for change dates.
-        # -----------------------------------------
+        # =====================================================
+        # 1. Extract change date
+        # =====================================================
 
         change_match = self.CHANGE_PATTERN.search(
             question
@@ -107,14 +126,15 @@ class PolicyDateExtractor:
 
         if change_match:
 
-            result.change_date = self._parse_text_date(
-                change_match.group("date")
+            result.change_date = (
+                self._parse_text_date(
+                    change_match.group("date")
+                )
             )
 
-        # -----------------------------------------
-        # 2. Look specifically for determination
-        #    dates.
-        # -----------------------------------------
+        # =====================================================
+        # 2. Extract determination date
+        # =====================================================
 
         determination_match = (
             self.DETERMINATION_PATTERN.search(
@@ -134,21 +154,49 @@ class PolicyDateExtractor:
 
     def _parse_text_date(
         self,
-        text: str
+        text: str,
     ) -> Optional[date]:
+        """
+        Convert a textual date such as
+        '5 March 2026' into a datetime.date.
+        """
 
-        match = self.DATE_PATTERN.search(text)
+        match = self.DATE_PATTERN.search(
+            text
+        )
 
         if not match:
             return None
 
-        day = int(match.group("day"))
+        day = int(
+            re.search(
+                r"\d{1,2}",
+                match.group("date"),
+            ).group()
+        )
+
+        month_match = re.search(
+            r"(January|February|March|April|May|June|"
+            r"July|August|September|October|November|December)",
+            match.group("date"),
+            re.IGNORECASE,
+        )
+
+        year_match = re.search(
+            r"\d{4}",
+            match.group("date"),
+        )
+
+        if not month_match or not year_match:
+            return None
 
         month = self.MONTHS[
-            match.group("month").lower()
+            month_match.group().lower()
         ]
 
-        year = int(match.group("year"))
+        year = int(
+            year_match.group()
+        )
 
         try:
 
@@ -160,6 +208,8 @@ class PolicyDateExtractor:
 
         except ValueError:
 
+            # Invalid dates such as:
+            # 31 February 2026
             return None
 
 

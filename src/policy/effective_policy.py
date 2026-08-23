@@ -8,8 +8,11 @@ from src.policy.versioning import PolicyVersionResolver
 @dataclass
 class EffectiveProvision:
     """
-    Represents the version of a policy provision that
-    applies to a particular case.
+    Represents a policy provision selected for a case.
+
+    version:
+        original -> provision from the original policy manual
+        amended  -> provision after applying the amendment
     """
 
     citation: str
@@ -20,8 +23,17 @@ class EffectiveProvision:
 
 class EffectivePolicyResolver:
     """
-    Combines the original policy manual with amendments
-    and determines which version of a provision applies.
+    Resolves the effective version of policy provisions.
+
+    IMPORTANT DESIGN RULE
+    ---------------------
+    This class determines which version is applicable to a case.
+
+    It does NOT perform contradiction detection.
+
+    For historical cases, the surrounding pipeline may need both
+    the original and amended provisions so that the contradiction
+    layer can determine whether conflicting rules exist.
     """
 
     def __init__(
@@ -29,7 +41,6 @@ class EffectivePolicyResolver:
         provisions: List[Dict],
         amendments: List[Amendment],
     ):
-
         self.provisions = provisions
         self.amendments = amendments
 
@@ -40,6 +51,10 @@ class EffectivePolicyResolver:
             for amendment in amendments
         }
 
+    # =========================================================
+    # PUBLIC API
+    # =========================================================
+
     def get_provision(
         self,
         section: str,
@@ -48,10 +63,6 @@ class EffectivePolicyResolver:
         determination_date=None,
     ) -> EffectiveProvision:
 
-        # ---------------------------------------------
-        # 1. Find the original provision
-        # ---------------------------------------------
-
         original = self._find_original(section)
 
         if original is None:
@@ -59,19 +70,13 @@ class EffectivePolicyResolver:
                 f"Policy provision §{section} was not found."
             )
 
-        # ---------------------------------------------
-        # 2. Check whether this provision was actually
-        #    modified by Amendment No. 2026-01.
-        # ---------------------------------------------
+        amendment = self.amendments_by_section.get(section)
 
-        amendment = self.amendments_by_section.get(
-            section
-        )
+        # -----------------------------------------------------
+        # No amendment exists for this section.
+        # -----------------------------------------------------
 
-        # If the provision was never amended,
-        # the original wording remains valid.
         if amendment is None:
-
             return EffectiveProvision(
                 citation=original["citation"],
                 text=original["text"],
@@ -79,12 +84,9 @@ class EffectivePolicyResolver:
                 version="original",
             )
 
-        # ---------------------------------------------
-        # 3. This provision WAS amended.
-        #
-        # Now determine whether the original or
-        # amended version applies.
-        # ---------------------------------------------
+        # -----------------------------------------------------
+        # Resolve the applicable version.
+        # -----------------------------------------------------
 
         version = self.version_resolver.resolve(
             topic=topic,
@@ -92,12 +94,11 @@ class EffectivePolicyResolver:
             determination_date=determination_date,
         )
 
-        # ---------------------------------------------
-        # 4. Original version applies
-        # ---------------------------------------------
+        # -----------------------------------------------------
+        # Original version applies.
+        # -----------------------------------------------------
 
         if version.version == "original":
-
             return EffectiveProvision(
                 citation=original["citation"],
                 text=original["text"],
@@ -105,9 +106,9 @@ class EffectivePolicyResolver:
                 version="original",
             )
 
-        # ---------------------------------------------
-        # 5. Amended version applies
-        # ---------------------------------------------
+        # -----------------------------------------------------
+        # Amended version applies.
+        # -----------------------------------------------------
 
         amended_text = self._apply_amendment(
             original["text"],
@@ -121,17 +122,145 @@ class EffectivePolicyResolver:
             version="amended",
         )
 
+    # =========================================================
+    # HISTORICAL / CONFLICT SUPPORT
+    # =========================================================
+
+    def get_versions(
+        self,
+        section: str,
+        topic: str,
+        change_date=None,
+        determination_date=None,
+    ) -> List[EffectiveProvision]:
+        """
+        Return the policy versions relevant to the case.
+
+        This is intentionally different from get_provision().
+
+        get_provision()
+            Returns the single effective version.
+
+        get_versions()
+            Returns the effective version plus the competing
+            historical version when an amendment exists.
+
+        This allows the contradiction layer to compare:
+
+            original: 10 calendar days
+            amended:  14 calendar days
+
+        without embedding contradiction logic inside the
+        version resolver.
+        """
+
+        original = self._find_original(section)
+
+        if original is None:
+            raise ValueError(
+                f"Policy provision §{section} was not found."
+            )
+
+        amendment = self.amendments_by_section.get(section)
+
+        # -----------------------------------------------------
+        # No amendment => only one version exists.
+        # -----------------------------------------------------
+
+        if amendment is None:
+            return [
+                EffectiveProvision(
+                    citation=original["citation"],
+                    text=original["text"],
+                    source="policy-manual.md",
+                    version="original",
+                )
+            ]
+
+        # -----------------------------------------------------
+        # Resolve which version applies.
+        # -----------------------------------------------------
+
+        version = self.version_resolver.resolve(
+            topic=topic,
+            change_date=change_date,
+            determination_date=determination_date,
+        )
+
+        amended_text = self._apply_amendment(
+            original["text"],
+            amendment,
+        )
+
+        original_provision = EffectiveProvision(
+            citation=original["citation"],
+            text=original["text"],
+            source="policy-manual.md",
+            version="original",
+        )
+
+        amended_provision = EffectiveProvision(
+            citation=original["citation"],
+            text=amended_text,
+            source="Amendment No. 2026-01.md",
+            version="amended",
+        )
+
+        # -----------------------------------------------------
+        # If the resolver selected the original version,
+        # put the original first.
+        # -----------------------------------------------------
+
+        if version.version == "original":
+            return [
+                original_provision,
+                amended_provision,
+            ]
+
+        # -----------------------------------------------------
+        # If the resolver selected amended version,
+        # put amended first.
+        # -----------------------------------------------------
+
+        return [
+            amended_provision,
+            original_provision,
+        ]
+
+    # =========================================================
+    # FIND ORIGINAL PROVISION
+    # =========================================================
+
     def _find_original(
         self,
         section: str,
     ) -> Optional[Dict]:
 
+        normalized_section = self._normalize_section(
+            section
+        )
+
         for provision in self.provisions:
 
-            if provision["id"] == section:
+            provision_id = self._normalize_section(
+                provision.get("id", "")
+            )
+
+            citation = self._normalize_section(
+                provision.get("citation", "")
+            )
+
+            if (
+                provision_id == normalized_section
+                or citation == normalized_section
+            ):
                 return provision
 
         return None
+
+    # =========================================================
+    # APPLY AMENDMENT
+    # =========================================================
 
     @staticmethod
     def _apply_amendment(
@@ -139,22 +268,42 @@ class EffectivePolicyResolver:
         amendment: Amendment,
     ) -> str:
 
-        # ---------------------------------------------
+        amendment_type = (
+            amendment.amendment_type
+        )
+
+        # -----------------------------------------------------
         # SUBSTITUTE
-        # ---------------------------------------------
+        # -----------------------------------------------------
 
-        if amendment.amendment_type == "SUBSTITUTE":
+        if amendment_type == "SUBSTITUTE":
 
-            return original_text.replace(
-                amendment.original_text,
-                amendment.replacement_text,
+            original_fragment = (
+                amendment.original_text
             )
 
-        # ---------------------------------------------
-        # TABLE REPLACEMENT
-        # ---------------------------------------------
+            replacement = (
+                amendment.replacement_text
+            )
 
-        if amendment.amendment_type == "TABLE_REPLACEMENT":
+            # Normal replacement.
+            if original_fragment in original_text:
+                return original_text.replace(
+                    original_fragment,
+                    replacement,
+                )
+
+            # If the exact original text cannot be found,
+            # return the replacement as the authoritative
+            # amended wording rather than silently keeping
+            # stale policy text.
+            return replacement
+
+        # -----------------------------------------------------
+        # TABLE REPLACEMENT
+        # -----------------------------------------------------
+
+        if amendment_type == "TABLE_REPLACEMENT":
 
             return (
                 "The amended provision contains the "
@@ -162,11 +311,11 @@ class EffectivePolicyResolver:
                 + amendment.replacement_text
             )
 
-        # ---------------------------------------------
+        # -----------------------------------------------------
         # INSERT
-        # ---------------------------------------------
+        # -----------------------------------------------------
 
-        if amendment.amendment_type == "INSERT":
+        if amendment_type == "INSERT":
 
             return (
                 original_text
@@ -174,11 +323,30 @@ class EffectivePolicyResolver:
                 + amendment.replacement_text
             )
 
-        # ---------------------------------------------
-        # Unknown amendment type
-        # ---------------------------------------------
+        # -----------------------------------------------------
+        # Unknown amendment type.
+        # -----------------------------------------------------
 
         raise ValueError(
-            f"Unsupported amendment type: "
-            f"{amendment.amendment_type}"
+            "Unsupported amendment type: "
+            f"{amendment_type}"
         )
+
+    # =========================================================
+    # NORMALIZATION
+    # =========================================================
+
+    @staticmethod
+    def _normalize_section(
+        section: str,
+    ) -> str:
+
+        if not section:
+            return ""
+
+        value = section.strip().lower()
+
+        value = value.replace("§", "")
+        value = value.replace(" ", "")
+
+        return value
