@@ -1,6 +1,8 @@
 from dataclasses import dataclass
 from typing import List, Dict
 
+from src.evidence.contradiction import ContradictionDetector
+
 
 @dataclass
 class EvidenceDecision:
@@ -19,7 +21,10 @@ class EvidenceEvaluator:
     sufficient to proceed to answer generation.
 
     This layer does NOT generate the final answer.
-    It only decides whether answering is appropriate.
+    It decides whether answering is appropriate.
+
+    Contradictory evidence always takes priority over
+    the relevance score.
     """
 
     def __init__(
@@ -30,10 +35,17 @@ class EvidenceEvaluator:
         self.minimum_score = minimum_score
         self.strong_score = strong_score
 
+        # Create the contradiction detector once
+        self.contradiction_detector = ContradictionDetector()
+
     def evaluate(
         self,
         results: List[Dict]
     ) -> EvidenceDecision:
+
+        # --------------------------------------------------
+        # 1. No evidence
+        # --------------------------------------------------
 
         if not results:
             return EvidenceDecision(
@@ -42,7 +54,10 @@ class EvidenceEvaluator:
                 evidence=[]
             )
 
-        # Remove results below the minimum relevance threshold.
+        # --------------------------------------------------
+        # 2. Remove weakly relevant evidence
+        # --------------------------------------------------
+
         relevant_results = [
             result
             for result in results
@@ -59,19 +74,47 @@ class EvidenceEvaluator:
                 evidence=[]
             )
 
-        # If the strongest result is sufficiently relevant,
-        # allow the answer stage to continue.
+        # --------------------------------------------------
+        # 3. Check for contradiction
+        # --------------------------------------------------
+
+        contradiction = self.contradiction_detector.detect(
+            relevant_results
+        )
+
+        if contradiction.conflict:
+
+            return EvidenceDecision(
+                decision="REFUSE",
+                reason=(
+                    "The retrieved policy provisions contain "
+                    "a potential contradiction. A definitive "
+                    "answer cannot be given from the manual."
+                ),
+                evidence=contradiction.clauses
+            )
+
+        # --------------------------------------------------
+        # 4. Check evidence strength
+        # --------------------------------------------------
+
         strongest_score = relevant_results[0]["score"]
 
         if strongest_score >= self.strong_score:
+
             return EvidenceDecision(
                 decision="ANSWER",
                 reason=(
                     "Sufficiently relevant policy evidence "
-                    "was retrieved."
+                    "was retrieved and no contradiction "
+                    "was detected."
                 ),
                 evidence=relevant_results
             )
+
+        # --------------------------------------------------
+        # 5. Evidence is too weak
+        # --------------------------------------------------
 
         return EvidenceDecision(
             decision="REFUSE",
