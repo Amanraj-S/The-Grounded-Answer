@@ -1,7 +1,5 @@
 from dataclasses import dataclass
-from typing import List, Dict
-
-from src.evidence.contradiction import ContradictionDetector
+from typing import Dict, List
 
 
 @dataclass
@@ -18,13 +16,12 @@ class EvidenceDecision:
 class EvidenceEvaluator:
     """
     Determines whether retrieved policy evidence is
-    sufficient to proceed to answer generation.
+    sufficiently relevant and strong enough to proceed.
 
-    This layer does NOT generate the final answer.
-    It decides whether answering is appropriate.
+    This layer does NOT detect contradictions.
 
-    Contradictory evidence always takes priority over
-    the relevance score.
+    Contradiction detection is handled separately by
+    ContradictionDetector.
     """
 
     def __init__(
@@ -35,28 +32,28 @@ class EvidenceEvaluator:
         self.minimum_score = minimum_score
         self.strong_score = strong_score
 
-        # Create the contradiction detector once
-        self.contradiction_detector = ContradictionDetector()
-
     def evaluate(
         self,
-        results: List[Dict]
+        results: List[Dict],
     ) -> EvidenceDecision:
 
-        # --------------------------------------------------
+        # ---------------------------------------------
         # 1. No evidence
-        # --------------------------------------------------
+        # ---------------------------------------------
 
         if not results:
+
             return EvidenceDecision(
                 decision="REFUSE",
-                reason="No policy evidence was retrieved.",
-                evidence=[]
+                reason=(
+                    "No policy evidence was retrieved."
+                ),
+                evidence=[],
             )
 
-        # --------------------------------------------------
-        # 2. Remove weakly relevant evidence
-        # --------------------------------------------------
+        # ---------------------------------------------
+        # 2. Remove weak evidence
+        # ---------------------------------------------
 
         relevant_results = [
             result
@@ -65,40 +62,24 @@ class EvidenceEvaluator:
         ]
 
         if not relevant_results:
+
             return EvidenceDecision(
                 decision="REFUSE",
                 reason=(
-                    "The retrieved policy provisions are not "
-                    "relevant enough to support an answer."
+                    "The retrieved policy provisions are "
+                    "not relevant enough to support an answer."
                 ),
-                evidence=[]
+                evidence=[],
             )
 
-        # --------------------------------------------------
-        # 3. Check for contradiction
-        # --------------------------------------------------
+        # ---------------------------------------------
+        # 3. Check strongest evidence
+        # ---------------------------------------------
 
-        contradiction = self.contradiction_detector.detect(
-            relevant_results
+        strongest_score = max(
+            result["score"]
+            for result in relevant_results
         )
-
-        if contradiction.conflict:
-
-            return EvidenceDecision(
-                decision="REFUSE",
-                reason=(
-                    "The retrieved policy provisions contain "
-                    "a potential contradiction. A definitive "
-                    "answer cannot be given from the manual."
-                ),
-                evidence=contradiction.clauses
-            )
-
-        # --------------------------------------------------
-        # 4. Check evidence strength
-        # --------------------------------------------------
-
-        strongest_score = relevant_results[0]["score"]
 
         if strongest_score >= self.strong_score:
 
@@ -106,21 +87,20 @@ class EvidenceEvaluator:
                 decision="ANSWER",
                 reason=(
                     "Sufficiently relevant policy evidence "
-                    "was retrieved and no contradiction "
-                    "was detected."
+                    "was retrieved."
                 ),
-                evidence=relevant_results
+                evidence=relevant_results,
             )
 
-        # --------------------------------------------------
-        # 5. Evidence is too weak
-        # --------------------------------------------------
+        # ---------------------------------------------
+        # 4. Evidence is too weak
+        # ---------------------------------------------
 
         return EvidenceDecision(
             decision="REFUSE",
             reason=(
-                "The retrieved evidence is too weak to "
-                "support a reliable answer."
+                "The retrieved evidence is too weak "
+                "to support a reliable answer."
             ),
-            evidence=relevant_results
+            evidence=relevant_results,
         )

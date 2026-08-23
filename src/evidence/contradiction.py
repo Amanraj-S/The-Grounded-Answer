@@ -1,4 +1,5 @@
 import re
+
 from dataclasses import dataclass
 from typing import Dict, List
 
@@ -16,39 +17,39 @@ class ContradictionResult:
 
 class ContradictionDetector:
     """
-    Detects potential contradictions between policy provisions.
+    Detects explicit contradictions between policy provisions.
 
-    This first version focuses on explicit numeric conflicts,
-    such as two different deadlines or limits concerning
-    the same policy topic.
+    The detector only reports a conflict when two provisions
+    appear to state different values for the same type of
+    requirement.
 
-    It does not silently choose one provision over another.
+    Repeated mentions of the same value inside a provision
+    do not count as a contradiction.
     """
-
-    NUMBER_PATTERN = re.compile(
-        r"\b\d+(?:\.\d+)?\b"
-    )
 
     TIME_PATTERN = re.compile(
         r"\b\d+\s+(?:calendar\s+)?days?\b",
-        re.IGNORECASE
+        re.IGNORECASE,
     )
 
     MONEY_PATTERN = re.compile(
         r"\$\s?\d+(?:,\d{3})*(?:\.\d+)?",
-        re.IGNORECASE
+        re.IGNORECASE,
     )
 
     def detect(
         self,
-        provisions: List[Dict]
+        provisions: List[Dict],
     ) -> ContradictionResult:
 
         if len(provisions) < 2:
+
             return ContradictionResult(
                 conflict=False,
                 clauses=[],
-                reason="Fewer than two provisions were available."
+                reason=(
+                    "Fewer than two provisions were available."
+                ),
             )
 
         # Compare every pair of retrieved provisions.
@@ -61,35 +62,40 @@ class ContradictionDetector:
 
                 conflict_reason = self._compare_pair(
                     first,
-                    second
+                    second,
                 )
 
                 if conflict_reason:
 
                     return ContradictionResult(
                         conflict=True,
-                        clauses=[first, second],
-                        reason=conflict_reason
+                        clauses=[
+                            first,
+                            second,
+                        ],
+                        reason=conflict_reason,
                     )
 
         return ContradictionResult(
             conflict=False,
             clauses=[],
-            reason="No explicit contradiction was detected."
+            reason=(
+                "No explicit contradiction was detected."
+            ),
         )
 
     def _compare_pair(
         self,
         first: Dict,
-        second: Dict
+        second: Dict,
     ) -> str:
 
         first_text = first["text"]
         second_text = second["text"]
 
-        # --------------------------------------------------
-        # Check for conflicting time periods.
-        # --------------------------------------------------
+        # ==================================================
+        # CHECK TIME PERIODS
+        # ==================================================
 
         first_times = self.TIME_PATTERN.findall(
             first_text
@@ -109,21 +115,51 @@ class ContradictionDetector:
                 second_times
             )
 
-            if first_days and second_days:
+            # ----------------------------------------------
+            # IMPORTANT:
+            #
+            # A provision may mention the same deadline
+            # more than once.
+            #
+            # Example:
+            # §4.3.2 -> 14 days, 14 days
+            # §9.1.4 -> 14 days
+            #
+            # [14, 14] and [14] are not contradictory.
+            # ----------------------------------------------
 
-                if first_days != second_days:
+            first_unique_days = set(
+                first_days
+            )
 
-                    return (
-                        f"Different time periods were found: "
-                        f"{first['citation']} states "
-                        f"{first_times[0]}, while "
-                        f"{second['citation']} states "
-                        f"{second_times[0]}."
-                    )
+            second_unique_days = set(
+                second_days
+            )
 
-        # --------------------------------------------------
-        # Check for conflicting monetary amounts.
-        # --------------------------------------------------
+            # Same effective time requirement.
+            if first_unique_days == second_unique_days:
+
+                return ""
+
+            # Different values are only considered a
+            # contradiction when both provisions concern
+            # the same reporting/deadline topic.
+            if self._same_reporting_topic(
+                first_text,
+                second_text,
+            ):
+
+                return (
+                    "Different reporting periods were found: "
+                    f"{first['citation']} states "
+                    f"{first_times[0]}, while "
+                    f"{second['citation']} states "
+                    f"{second_times[0]}."
+                )
+
+        # ==================================================
+        # CHECK MONETARY AMOUNTS
+        # ==================================================
 
         first_money = self.MONEY_PATTERN.findall(
             first_text
@@ -135,10 +171,30 @@ class ContradictionDetector:
 
         if first_money and second_money:
 
-            if first_money != second_money:
+            # Compare unique monetary values so repeated
+            # mentions of the same amount do not create
+            # a false contradiction.
+
+            first_unique_money = set(
+                first_money
+            )
+
+            second_unique_money = set(
+                second_money
+            )
+
+            # Same effective monetary requirement.
+            if first_unique_money == second_unique_money:
+
+                return ""
+
+            if self._same_money_topic(
+                first_text,
+                second_text,
+            ):
 
                 return (
-                    f"Different monetary amounts were found: "
+                    "Different monetary amounts were found: "
                     f"{first['citation']} contains "
                     f"{first_money[0]}, while "
                     f"{second['citation']} contains "
@@ -148,8 +204,61 @@ class ContradictionDetector:
         return ""
 
     @staticmethod
+    def _same_reporting_topic(
+        first_text: str,
+        second_text: str,
+    ) -> bool:
+
+        combined = (
+            first_text.lower()
+            + " "
+            + second_text.lower()
+        )
+
+        reporting_terms = [
+            "report",
+            "reporting",
+            "failure to report",
+            "change of circumstances",
+            "change in income",
+        ]
+
+        return any(
+            term in combined
+            for term in reporting_terms
+        )
+
+    @staticmethod
+    def _same_money_topic(
+        first_text: str,
+        second_text: str,
+    ) -> bool:
+
+        combined = (
+            first_text.lower()
+            + " "
+            + second_text.lower()
+        )
+
+        money_terms = [
+            "amount",
+            "threshold",
+            "income",
+            "resource",
+            "resources",
+            "disregard",
+            "sanction",
+            "award",
+        ]
+
+        return any(
+            term in combined
+            for term in money_terms
+        )
+
+    @staticmethod
     def _extract_days(
-        values: List[str]
+        values: List[str],
     ) -> List[int]:
 
         days = []
@@ -158,10 +267,11 @@ class ContradictionDetector:
 
             match = re.search(
                 r"\d+",
-                value
+                value,
             )
 
             if match:
+
                 days.append(
                     int(match.group())
                 )

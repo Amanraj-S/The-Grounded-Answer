@@ -6,13 +6,13 @@ from src.policy.effective_policy import EffectivePolicyResolver
 
 class DateAwareRetriever:
     """
-    Combines the existing FAISS retriever with the
-    date-aware policy layer.
+    Combines the real FAISS PolicyRetriever with
+    date-aware policy resolution.
 
-    FAISS finds the relevant policy provisions.
+    FAISS determines WHICH provisions are relevant.
 
-    EffectivePolicyResolver determines whether the
-    original or amended wording applies.
+    EffectivePolicyResolver determines WHICH VERSION
+    of those provisions applies.
     """
 
     def __init__(
@@ -21,7 +21,6 @@ class DateAwareRetriever:
         provisions: List[Dict],
         amendments,
     ):
-
         self.retriever = retriever
 
         self.effective_policy = EffectivePolicyResolver(
@@ -39,8 +38,7 @@ class DateAwareRetriever:
     ) -> List[Dict]:
 
         # ---------------------------------------------
-        # STEP 1
-        # Let FAISS retrieve the relevant provisions.
+        # 1. REAL FAISS RETRIEVAL
         # ---------------------------------------------
 
         retrieved = self.retriever.search(
@@ -51,9 +49,7 @@ class DateAwareRetriever:
         effective_results = []
 
         # ---------------------------------------------
-        # STEP 2
-        # Apply the correct policy version to each
-        # retrieved provision.
+        # 2. APPLY EFFECTIVE POLICY VERSION
         # ---------------------------------------------
 
         for result in retrieved:
@@ -69,21 +65,14 @@ class DateAwareRetriever:
 
             effective_results.append(
                 {
-                    "id": effective.citation.replace(
-                        "§",
-                        ""
-                    ),
-
+                    "id": result["id"],
                     "citation": effective.citation,
-
                     "text": effective.text,
 
-                    # IMPORTANT:
-                    # This is the REAL FAISS score.
+                    # REAL FAISS SCORE
                     "score": result["score"],
 
                     "source": effective.source,
-
                     "version": effective.version,
                 }
             )
