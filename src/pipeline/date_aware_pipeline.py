@@ -312,13 +312,20 @@ def process_question(
 
     if not date_decision.can_proceed:
 
+        missing_date_answer = (
+            f"{date_decision.reason}\n\n"
+            "Who to ask / Next steps:\n"
+            "Please specify the applicable claim date or determination date, "
+            "or contact a Department caseworker for assistance."
+        )
+
         return {
             "status": "MISSING_DATE",
             "question": question,
             "topic": topic,
             "change_date": dates.change_date,
             "determination_date": dates.determination_date,
-            "answer": date_decision.reason,
+            "answer": missing_date_answer,
             "citations": [],
             "evidence": [],
         }
@@ -400,13 +407,19 @@ def process_question(
 
     if evidence_decision.decision == "REFUSE":
 
+        refuse_answer = (
+            f"Reason: {evidence_decision.reason}\n\n"
+            "Who to ask / Next steps:\n"
+            "Please consult a senior policy officer or supervisor for clarification."
+        )
+
         return {
             "status": "REFUSE",
             "question": question,
             "topic": topic,
             "change_date": dates.change_date,
             "determination_date": dates.determination_date,
-            "answer": evidence_decision.reason,
+            "answer": refuse_answer,
             "citations": [],
             "evidence": evidence_decision.evidence,
         }
@@ -423,13 +436,20 @@ def process_question(
 
     if contradiction_result.conflict:
 
+        conflict_answer = (
+            f"{contradiction_result.reason}\n\n"
+            "Who to ask / Next steps:\n"
+            "Please escalate this case to a Calder County Department Supervisor "
+            "under §1.1.3 for discretionary determination."
+        )
+
         return {
             "status": "CONFLICT",
             "question": question,
             "topic": topic,
             "change_date": dates.change_date,
             "determination_date": dates.determination_date,
-            "answer": contradiction_result.reason,
+            "answer": conflict_answer,
             "citations": [
                 clause["citation"]
                 for clause
@@ -481,9 +501,17 @@ def run():
     )
     print("=" * 70)
 
-    question = input(
-        "\nAsk a policy question: "
-    )
+    try:
+        question = input(
+            "\nAsk a policy question (or press Enter to exit): "
+        )
+    except (KeyboardInterrupt, EOFError):
+        print("\nExiting Policy Pipeline.")
+        return
+
+    if not question or not question.strip():
+        print("\nNo policy question was entered. Exiting.")
+        return
 
     result = process_question(
         question

@@ -67,6 +67,9 @@ A recipient must report any change in household composition, income, address, or
 
 Different reporting periods were found: §4.3.2 states 10 calendar days, while §9.1.4 states 30 calendar days.
 
+Who to ask / Next steps:
+Please escalate this case to a Calder County Department Supervisor under §1.1.3 for discretionary determination.
+
 **Citations:** §4.3.2, §9.1.4
 
 ### 3. Missing Change Date
@@ -88,6 +91,9 @@ Different reporting periods were found: §4.3.2 states 10 calendar days, while �
 **Answer / Reason:**
 
 The date on which the change occurred is required to determine which reporting rule applies.
+
+Who to ask / Next steps:
+Please specify the applicable claim date or determination date, or contact a Department caseworker for assistance.
 
 ### 4. Policy Not Covered
 
