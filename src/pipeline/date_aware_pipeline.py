@@ -8,6 +8,8 @@ from src.retrieval.date_aware_retriever import DateAwareRetriever
 from src.evidence.evaluator import EvidenceEvaluator
 from src.evidence.contradiction import ContradictionDetector
 
+from src.answer.generator import AnswerGenerator
+
 
 POLICY_PATH = "data/policy-manual.md"
 AMENDMENT_PATH = "data/Amendment No. 2026-01.md"
@@ -32,7 +34,10 @@ def detect_topic(question: str) -> str:
 
     question_lower = question.lower()
 
+    # ---------------------------------------------
     # Reporting changes
+    # ---------------------------------------------
+
     if any(
         phrase in question_lower
         for phrase in [
@@ -45,7 +50,10 @@ def detect_topic(question: str) -> str:
     ):
         return "reporting_change"
 
+    # ---------------------------------------------
     # Income thresholds
+    # ---------------------------------------------
+
     if any(
         phrase in question_lower
         for phrase in [
@@ -56,7 +64,10 @@ def detect_topic(question: str) -> str:
     ):
         return "income_threshold"
 
+    # ---------------------------------------------
     # Sanctions
+    # ---------------------------------------------
+
     if any(
         phrase in question_lower
         for phrase in [
@@ -66,7 +77,10 @@ def detect_topic(question: str) -> str:
     ):
         return "sanction"
 
+    # ---------------------------------------------
     # Earnings disregard
+    # ---------------------------------------------
+
     if any(
         phrase in question_lower
         for phrase in [
@@ -82,18 +96,18 @@ def detect_topic(question: str) -> str:
 def build_pipeline():
     """
     Build all components required for the
-    date-aware policy pipeline.
+    date-aware grounded-answer pipeline.
     """
 
-    # ---------------------------------------------
-    # Load original policy
-    # ---------------------------------------------
+    # =============================================
+    # 1. Load original policy
+    # =============================================
 
     provisions = load_policy_provisions()
 
-    # ---------------------------------------------
-    # Parse amendments
-    # ---------------------------------------------
+    # =============================================
+    # 2. Parse amendments
+    # =============================================
 
     amendment_parser = AmendmentParser()
 
@@ -101,15 +115,15 @@ def build_pipeline():
         AMENDMENT_PATH
     )
 
-    # ---------------------------------------------
-    # Real FAISS retriever
-    # ---------------------------------------------
+    # =============================================
+    # 3. Create FAISS retriever
+    # =============================================
 
     retriever = PolicyRetriever()
 
-    # ---------------------------------------------
-    # Date-aware retriever
-    # ---------------------------------------------
+    # =============================================
+    # 4. Create date-aware retriever
+    # =============================================
 
     date_aware_retriever = DateAwareRetriever(
         retriever=retriever,
@@ -117,31 +131,37 @@ def build_pipeline():
         amendments=amendments,
     )
 
-    # ---------------------------------------------
-    # Date extractor
-    # ---------------------------------------------
+    # =============================================
+    # 5. Date extractor
+    # =============================================
 
     date_extractor = PolicyDateExtractor()
 
-    # ---------------------------------------------
-    # Date requirement evaluator
-    # ---------------------------------------------
+    # =============================================
+    # 6. Date requirement evaluator
+    # =============================================
 
     date_requirement_evaluator = (
         DateRequirementEvaluator()
     )
 
-    # ---------------------------------------------
-    # Evidence evaluator
-    # ---------------------------------------------
+    # =============================================
+    # 7. Evidence evaluator
+    # =============================================
 
     evidence_evaluator = EvidenceEvaluator()
 
-    # ---------------------------------------------
-    # Contradiction detector
-    # ---------------------------------------------
+    # =============================================
+    # 8. Contradiction detector
+    # =============================================
 
     contradiction_detector = ContradictionDetector()
+
+    # =============================================
+    # 9. Answer generator
+    # =============================================
+
+    answer_generator = AnswerGenerator()
 
     return (
         date_extractor,
@@ -149,6 +169,7 @@ def build_pipeline():
         date_aware_retriever,
         evidence_evaluator,
         contradiction_detector,
+        answer_generator,
     )
 
 
@@ -160,10 +181,11 @@ def run():
         retriever,
         evidence_evaluator,
         contradiction_detector,
+        answer_generator,
     ) = build_pipeline()
 
     print("=" * 70)
-    print("DATE-AWARE POLICY RETRIEVAL")
+    print("GROUNDED ANSWER — DATE-AWARE POLICY PIPELINE")
     print("=" * 70)
 
     question = input(
@@ -282,21 +304,27 @@ def run():
         return
 
     # =================================================
-    # STEP 6 — Evaluate evidence strength
+    # STEP 6 — Evaluate evidence
     # =================================================
 
-    evidence_decision = evidence_evaluator.evaluate(
-        results
+    evidence_decision = (
+        evidence_evaluator.evaluate(
+            results
+        )
     )
 
-    if evidence_decision.decision == "REFUSE":
+    if (
+        evidence_decision.decision
+        == "REFUSE"
+    ):
 
         print("\n========================================")
         print("REFUSAL — INSUFFICIENT EVIDENCE")
         print("========================================")
 
         print(
-            f"\nReason: {evidence_decision.reason}"
+            f"\nReason: "
+            f"{evidence_decision.reason}"
         )
 
         return
@@ -318,15 +346,18 @@ def run():
         print("========================================")
 
         print(
-            "\nThe retrieved policy provisions contain "
-            "a conflict that prevents a reliable answer."
+            "\nThe retrieved policy provisions "
+            "contain a conflict that prevents "
+            "a reliable answer."
         )
 
         print(
             "\nConflicting clauses:"
         )
 
-        for clause in contradiction_result.clauses:
+        for clause in (
+            contradiction_result.clauses
+        ):
 
             print(
                 f"\n{clause['citation']}"
@@ -339,48 +370,54 @@ def run():
         return
 
     # =================================================
-    # STEP 8 — Safe evidence
+    # STEP 8 — Generate final answer
+    # =================================================
+
+    answer_result = answer_generator.generate(
+        question=question,
+        evidence=evidence_decision.evidence,
+    )
+
+    # =================================================
+    # STEP 9 — Display final answer
     # =================================================
 
     print("\n========================================")
-    print("SAFE POLICY EVIDENCE")
+    print("FINAL ANSWER")
     print("========================================")
 
-    for result in evidence_decision.evidence:
-
-        print(
-            f"\n{result['citation']} "
-            f"(score={result['score']:.4f})"
-        )
-
-        print(
-            f"Version: {result['version']}"
-        )
-
-        print(
-            f"Source: {result['source']}"
-        )
-
-        print(
-            f"Text:\n{result['text'][:1000]}"
-        )
+    print(
+        f"\n{answer_result.answer}"
+    )
 
     # =================================================
-    # STEP 9 — Answer layer comes next
+    # STEP 10 — Display citations
     # =================================================
 
     print("\n========================================")
-    print("DECISION")
+    print("CITATIONS")
     print("========================================")
 
-    print(
-        "\nEvidence is sufficient and no "
-        "contradiction was detected."
-    )
+    for citation in answer_result.citations:
 
-    print(
-        "\nThe system is ready for the Answer layer."
-    )
+        print(
+            f"\n{citation['citation']}"
+        )
+
+        print(
+            f"Source: "
+            f"{citation['source']}"
+        )
+
+        print(
+            f"Version: "
+            f"{citation['version']}"
+        )
+
+        print(
+            f"Evidence score: "
+            f"{citation['score']:.4f}"
+        )
 
 
 if __name__ == "__main__":
