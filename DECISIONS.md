@@ -1,158 +1,410 @@
 # Architectural Decisions & Technical Rationale
 
-**Grounded Answer — Calder County Household Support Program**
-**Brite Spark 2026 — Problem 1**
+## Grounded Answer — Calder County Household Support Program
 
-This document records the technical decisions, threshold choices, refusal boundaries, contradiction mechanics, and Day 2 date-aware architectural choices implemented in the Grounded Answer system.
+### Brite Spark 2026 — Problem 1: The Grounded Answer
+
+This document records the major architectural decisions, retrieval strategy,
+evidence thresholds, refusal boundaries, contradiction handling, date-aware
+policy resolution, and implementation choices used in the Grounded Answer
+system.
+
+The system is designed around one core principle:
+
+> When the policy manual does not provide sufficient evidence, the system
+> must refuse rather than invent an answer.
 
 ---
 
-## 1. Answer-vs-Refuse Boundary Design
+# 1. Core Design Philosophy
 
-### Core Philosophy
-In caseworker policy assistance, an incorrect policy guess is far worse than an explicit refusal. The Grounded Answer system enforces a strict **"Never Hallucinate / Grounded-Only"** contract:
-* **No LLM Synthesized Text**: Answers are constructed directly from authoritative policy provisions without generative paraphrasing or text rewriting.
-* **Separation of Retrieval & Sufficiency**: Retrieving semantically similar text does not imply that the manual answers the user's claim. A dedicated evidence evaluation layer (`EvidenceEvaluator`) validates textual support before answer generation is permitted.
+Grounded Answer is a policy-question answering engine built around the
+provided Calder County Household Support Program policy corpus.
 
-### Decision Taxonomy
+The system does not use a generative LLM to invent policy answers.
 
-The pipeline classifies every user query into one of five deterministic outcomes:
+Instead, answers are constructed from retrieved policy provisions and include
+the corresponding clause-level citations.
 
-```mermaid
-flowchart TD
-    A[User Question] --> B[Date Extractor & Topic Detector]
-    B --> C{Required Date Provided?}
-    C -- No --> D[MISSING_DATE Refusal]
-    C -- Yes --> E[Date-Aware FAISS Retrieval]
-    E --> F[Evidence Evaluator]
-    F -- Low Score / Unsupported --> G[NOT_COVERED Refusal]
-    F -- Weak Evidence --> H[REFUSE Refusal]
-    F -- Relevant Evidence --> I[Contradiction Detector]
-    I -- Conflict Detected --> J[CONFLICT Refusal]
-    I -- No Conflict --> K[ANSWER Grounded Result]
+The architecture separates:
+
+1. Question understanding
+2. Date extraction
+3. Date requirement validation
+4. Semantic retrieval
+5. Effective policy version resolution
+6. Evidence evaluation
+7. Contradiction detection
+8. Grounded answer formatting
+
+This separation makes the system easier to test, audit, and maintain.
+
+---
+
+# 2. Answer-vs-Refuse Boundary
+
+In policy assistance, an incorrect answer can be more harmful than an
+explicit refusal.
+
+Therefore, the engine follows a strict:
+
+**"Never Guess — Answer Only From Evidence"**
+
+principle.
+
+The system produces one of the following outcomes:
+
+### `ANSWER`
+
+Returned when:
+
+- relevant policy evidence is found,
+- the required date information is available when necessary,
+- the evidence is sufficiently strong,
+- no unresolved policy contradiction is detected.
+
+The response contains policy text and clause-level citations.
+
+---
+
+### `NOT_COVERED`
+
+Returned when:
+
+- the policy manual does not sufficiently support the question,
+- retrieved passages are only superficially related,
+- or the question falls outside the policy manual's authority.
+
+The system explicitly tells the user that the question cannot be answered
+from the policy manual.
+
+It also provides an appropriate next-step recommendation rather than
+inventing a policy answer.
+
+---
+
+### `MISSING_DATE`
+
+Returned when a date-sensitive policy question does not contain the date
+needed to determine the applicable policy version.
+
+Examples include:
+
+- reporting-change questions without a change date,
+- determination-based questions without a determination date.
+
+The system refuses to guess which policy version applies.
+
+---
+
+### `CONFLICT`
+
+Returned when relevant policy provisions contain unresolved contradictory
+requirements.
+
+The system does not arbitrarily select one provision.
+
+Instead, it reports the conflicting clauses and recommends escalation.
+
+---
+
+### `REFUSE`
+
+Used for evidence situations where the retrieved material is not strong
+enough to safely support an answer.
+
+---
+
+# 3. Processing Pipeline
+
+The production pipeline follows this structure:
+
+```text
+User Question
+      |
+      v
+Date Extraction
+      |
+      v
+Topic Detection
+      |
+      v
+Date Requirement Evaluation
+      |
+      +---- Missing required date ----> MISSING_DATE
+      |
+      v
+FAISS Semantic Retrieval
+      |
+      v
+Date-Aware Policy Resolution
+      |
+      v
+Evidence Evaluation
+      |
+      +---- Insufficient evidence ----> NOT_COVERED / REFUSE
+      |
+      v
+Contradiction Detection
+      |
+      +---- Conflict detected ----> CONFLICT
+      |
+      v
+Grounded Answer Generation
+      |
+      v
+Clause-Level Citations
 ```
 
-1. **`ANSWER`**:
-   * *Condition*: Dense retrieval score $\ge 0.50$, direct concept support confirmed, and no policy contradiction detected.
-   * *Output*: Verbatim policy provision text with exact clause citation (§X.Y.Z) and source metadata.
+---
 
-2. **`NOT_COVERED`**:
-   * *Condition*: Dense retrieval score $< 0.45$ OR retrieved passages fail direct conceptual support validation (e.g. asking for housing loans or legal representation).
-   * *Output*: Explicit refusal explaining policy manual boundary, plus escalation advice directing the user to Household Support Services team.
+# 4. Evidence Thresholds
 
-3. **`MISSING_DATE`**:
-   * *Condition*: Policy topic is date-sensitive (e.g., reporting change of circumstances, income thresholds) but query omits the claim or determination date.
-   * *Output*: Safety refusal refusing to guess today's policy date, prompting the user for the claim date.
+The system uses a two-stage evidence validation strategy.
 
-4. **`CONFLICT`**:
-   * *Condition*: Multiple retrieved provisions state contradictory numerical requirements for the same policy concept (e.g., pre-amendment §4.3.2 10 days vs §9.1.4 30 days).
-   * *Output*: Refusal identifying the contradiction, presenting both conflicting clauses, and escalating to a Department Supervisor under §1.1.3.
+Semantic similarity alone is not considered sufficient evidence because a question can be semantically similar to policy text without being directly supported by it.
 
-5. **`REFUSE`**:
-   * *Condition*: Retrieved evidence score is between 0.45 and 0.50 without strong conceptual alignment.
-   * *Output*: Refusal citing insufficient evidence and advising consultation with a senior policy officer.
+The evidence evaluator therefore applies:
+
+- `minimum_score = 0.45`
+- `strong_score = 0.50`
+
+Evidence below the minimum threshold is rejected as insufficient.
+
+Evidence above the strong threshold can be considered for an `ANSWER`, provided that the required concept is directly supported and no contradiction is detected.
+
+The evaluator also checks conceptual relevance to prevent false positives. For example, a question about a housing loan must not be answered merely because general recipient or assistance provisions are semantically similar.
+
+This creates a clear separation between:
+
+`Retrieval` → finding potentially relevant text
+
+`Evidence Evaluation` → determining whether that text actually supports the question
+
+`Answer Generation` → presenting only validated policy evidence
 
 ---
 
-## 2. Evidence Thresholds & Rationale
+# 5. Contradiction Handling
 
-| Threshold Parameter | Value | Technical Rationale |
-|---|---|---|
-| `minimum_score` | `0.45` | Empirical cosine similarity floor using `all-MiniLM-L6-v2`. Scores below 0.45 represent background noise or unrelated sections. |
-| `strong_score` | `0.50` | Score threshold above which semantic alignment indicates high relevance for answer candidates. |
-| `minimum_keyword_overlap` | `0.12` | Lexical overlap threshold (excluding stop words) ensuring retrieved text matches query vocabulary. |
-| `minimum_concept_overlap` | `1.0` | Mandatory domain concept match ensuring retrieved text discusses the specific claim (e.g., `loan`, `childcare`, `reporting`). |
+The system is intentionally conservative when policy provisions disagree.
 
-### Why Dense Embeddings Alone Are Insufficient
-Vector similarity alone can create false positives when a question uses program terminology. For example, asking *"Can I apply for a personal loan?"* matches general recipient eligibility clauses because words like *"apply"* and *"assistance"* produce high cosine similarity. 
+The `ContradictionDetector` checks retrieved provisions for conflicting requirements, including numerical differences such as:
 
-To solve this **Apparent Gap** problem, `EvidenceEvaluator` performs secondary validation:
-* Specific query concepts (`loan`, `childcare`, `legal_representation`) must explicitly exist in the retrieved provision text. If missing, the engine downgrades the result to `NOT_COVERED` despite vector similarity.
+- reporting periods,
+- monetary amounts,
+- percentages,
+- and other policy values.
 
----
+For the pre-amendment reporting rule, the policy corpus contains:
 
-## 3. Contradiction Detection & Escalation
+- `§4.3.2` — 10 calendar days
+- `§9.1.4` — 30 calendar days
 
-### The Pre-Amendment Reporting Inconsistency
-The consolidated policy manual (as at 31 December 2025) contains a genuine internal contradiction:
-* **§4.3.2**: Recipient must report changes of circumstances within **10 calendar days**.
-* **§9.1.4**: States that overpayments do not arise if reported within **30 calendar days required under §4.3**.
+When these provisions apply to the same historical claim, the system returns `CONFLICT`.
 
-### Detection Logic (`ContradictionDetector`)
-Instead of hardcoding specific test cases, `ContradictionDetector` analyzes all top-ranked candidate provisions for structural conflicts:
-1. **RegEx Extraction**: Extracts time period patterns (`\d+ calendar days`) and monetary amounts (`\$\d+`).
-2. **Concept Alignment**: Verifies whether both provisions govern the same policy requirement (`reporting_change`, `income_threshold`, `earnings_disregard`, `sanction`).
-3. **Difference Trigger**: If two provisions describe the same concept but specify different numeric values, `ContradictionDetector` flags a `conflict`.
+The system does not select one provision arbitrarily.
 
-### Handling Policy Inconsistency
-When a conflict is detected:
-* The system **never picks a winner** or makes an arbitrary choice.
-* Status is set to `CONFLICT`.
-* Both clauses (§4.3.2 and §9.1.4) are displayed verbatim to the user.
-* Escalation advice is appended instructing the caseworker to refer the case to a Department Supervisor under §1.1.3 (discretionary authority).
+Instead, it:
+
+1. identifies the conflicting provisions,
+2. reports both requirements,
+3. provides the relevant clause citations,
+4. recommends escalation to the appropriate Department authority.
+
+This ensures that an unresolved policy conflict never becomes a fabricated answer.
 
 ---
 
-## 4. Day 2 Date-Aware Architecture
+# 6. Date-Aware Amendment Logic
 
-Day 2 requirements introduced date sensitivity: policy determinations must reflect the **date of the claim**, not current policy.
+The system does not assume that the newest policy rule applies to every question.
 
-### Components
+Amendment No. 2026-01 has an effective date of:
 
-1. **`PolicyDateExtractor`**:
-   * Uses contextual RegEx patterns to extract dates from natural language questions.
-   * Differentiates `change_date` (*"income changed on 10 Feb 2026"*) from `determination_date` (*"determination made on 5 March 2026"*).
+`1 March 2026`
 
-2. **`DateRequirementEvaluator`**:
-   * Evaluates whether a question requires a date before retrieval proceeds.
-   * Reporting queries require `change_date`. Threshold, disregard, and sanction queries require `determination_date`.
-   * *Exception*: Questions explicitly citing a section (e.g. *"What does §6.4.1 say?"*) bypass date requirements as the section is explicitly requested.
+The `PolicyDateExtractor` identifies dates contained in natural-language questions.
 
-3. **`PolicyVersionResolver`**:
-   * Implements effective date comparison against `AMENDMENT_EFFECTIVE_DATE = date(2026, 3, 1)`.
-   * Routes queries to `original` (pre-amendment) or `amended` policy versions based on claim/determination date.
+The `DateRequirementEvaluator` determines whether a date is mandatory before retrieval and policy resolution can proceed.
 
-4. **`EffectivePolicyResolver`**:
-   * Maintains original policy provisions and overlays parsed amendments from `Amendment No. 2026-01.md`.
-   * Operates as a dynamic text overlay, preserving historical text for pre-March 2026 claims and applying amended text for post-March 2026 claims.
+The `PolicyVersionResolver` then determines which policy version applies.
 
-5. **`DateAwareRetriever`**:
-   * Integrates FAISS semantic retrieval with version resolution.
-   * **Competing Version Preservation**: When retrieving for date-sensitive queries, `DateAwareRetriever` preserves alternative historical versions of highly ranked provisions so `ContradictionDetector` can evaluate whether historical conflicts exist.
+### Reporting Changes
 
----
+For reporting-change questions:
 
-## 5. Amendment No. 2026-01 Effective Date Logic
+- Changes before `1 March 2026` use the original policy.
+- Changes on or after `1 March 2026` use the amended reporting rule.
 
-Amendment No. 2026-01 was issued on 12 February 2026 with an effective date of **1 March 2026**.
+Therefore:
 
-### Transitional Rule Implementation (Paragraph 5)
+`10 February 2026` → historical policy → unresolved conflict
 
-* **Paragraph 5.1 (Determinations on/after 1 March 2026)**:
-  * Earnings disregard (§6.4.1(a) $\to$ $175/month), income thresholds (§6.6.1 table), and sanction reduction (§10.5.2 $\to$ 15%) apply to any determination made on or after 1 March 2026.
-* **Paragraph 5.2 (Change of Circumstances Date)**:
-  * Reporting period amendments (§4.3.2 $\to$ 14 calendar days, §9.1.4 $\to$ 14 calendar days) apply **only in respect of changes occurring on or after 1 March 2026**.
-  * Changes occurring before 1 March 2026 remain governed by pre-amendment policy (retaining the §4.3.2 / §9.1.4 conflict).
-* **Paragraph 5.3 (Spanning Claims)**:
-  * Apportionment rules under §7.4.3 preserved.
+`10 March 2026` → amended policy → `14 calendar days`
+
+### Determination-Based Rules
+
+For determination-based rules such as:
+
+- earnings disregard,
+- income thresholds,
+- sanctions,
+
+the determination date controls the applicable policy version.
+
+Determinations made on or after `1 March 2026` use the amended values.
+
+This preserves historical policy behavior while correctly applying the amendment to later determinations.
 
 ---
 
-## 6. Modular Architecture & Maintainability
+# 7. Modular Architecture
 
-The system maintains strict modular separation across components:
+The system is divided into independent components so that individual responsibilities remain testable and maintainable.
 
-* `src/ingestion/parser.py`: Policy manual text parsing into structured provisions.
-* `src/policy/amendment_parser.py`: Amendment document parsing (substitutions, tables, insertions).
-* `src/policy/date_extractor.py`: RegEx date extraction.
-* `src/policy/date_requirement.py`: Date requirement safety gate.
-* `src/policy/versioning.py`: Policy version decision routing.
-* `src/policy/effective_policy.py`: Provision text overlay resolver.
-* `src/retrieval/retriever.py`: FAISS dense vector search & ranking boosts.
-* `src/retrieval/date_aware_retriever.py`: Date-aware candidate retrieval & competing version recovery.
-* `src/evidence/evaluator.py`: Multi-stage evidence relevance & concept verification.
-* `src/evidence/contradiction.py`: Numeric & concept contradiction detector.
-* `src/answer/generator.py`: Grounded answer formatter & citation builder.
-* `src/pipeline/date_aware_pipeline.py`: Unified pipeline orchestrator and CLI interface.
+```text
+src/
+├── ingestion/
+│   └── parser.py
+│
+├── policy/
+│   ├── amendment_parser.py
+│   ├── date_extractor.py
+│   ├── date_requirement.py
+│   ├── versioning.py
+│   └── effective_policy.py
+│
+├── retrieval/
+│   ├── retriever.py
+│   ├── date_aware_retriever.py
+│   └── index.py
+│
+├── evidence/
+│   ├── evaluator.py
+│   └── contradiction.py
+│
+├── answer/
+│   └── generator.py
+│
+└── pipeline/
+    └── date_aware_pipeline.py
+```
 
-This architecture ensures future amendments or policy changes can be added by updating markdown corpus files or version routing rules without refactoring core retrieval or answer generation logic.
+Each component has a focused responsibility:
+
+* **Ingestion** parses the policy corpus.
+* **Retrieval** finds relevant provisions using FAISS.
+* **Date extraction** identifies claim and determination dates.
+* **Version resolution** selects the applicable policy version.
+* **Evidence evaluation** verifies that retrieved evidence is sufficient.
+* **Contradiction detection** identifies unresolved policy conflicts.
+* **Answer generation** formats grounded responses and citations.
+* **Pipeline orchestration** connects the components into the production decision flow.
+
+This modular design allows future amendments to be incorporated without rewriting the entire system.
+
+---
+
+# 8. Testing and Evaluation
+
+The implementation is validated at multiple levels.
+
+### Unit Testing
+
+The `tests/` directory contains unit tests covering important components including:
+
+* date extraction,
+* amendment parsing,
+* policy version resolution,
+* evidence evaluation,
+* contradiction detection,
+* and related edge cases.
+
+Run:
+
+```bash
+pytest
+```
+
+### Demonstration Suite
+
+The `demo.py` script exercises the main system behaviors, including:
+
+* grounded policy answers,
+* unsupported questions,
+* apparent policy gaps,
+* contradiction detection,
+* pre-amendment handling,
+* post-amendment handling,
+* missing-date refusal,
+* and unrelated queries.
+
+Run:
+
+```bash
+python demo.py
+```
+
+### Benchmark Evaluation
+
+The automated benchmark contains 10 representative policy questions covering the major decision paths.
+
+Run:
+
+```bash
+python evaluation/run_evaluation.py
+```
+
+The evaluation report is written to:
+
+```text
+evaluation/results.md
+```
+
+The current benchmark result is:
+
+* **10 total cases**
+* **10 passed**
+* **0 failed**
+* **100% benchmark accuracy**
+
+The benchmark verifies that the system can distinguish between valid answers, historical conflicts, missing dates, unsupported questions, amended policy values, and grounded supporting evidence.
+
+---
+
+# 9. Design Outcome
+
+The final architecture prioritizes correctness, traceability, and safe refusal over producing an answer for every question.
+
+The system therefore follows this decision hierarchy:
+
+```text
+Can the question be understood?
+        |
+        v
+Is the required date available?
+        |
+        +---- No ----> MISSING_DATE
+        |
+        v
+Is relevant evidence retrieved?
+        |
+        +---- No ----> NOT_COVERED
+        |
+        v
+Does the evidence directly support the claim?
+        |
+        +---- No ----> NOT_COVERED / REFUSE
+        |
+        v
+Do relevant provisions conflict?
+        |
+        +---- Yes ---> CONFLICT
+        |
+        v
+ANSWER
+with exact policy evidence and clause-level citations
+```
+
+The resulting system is designed to be auditable: every answer can be traced back to the policy provision used to support it, while unsupported or contradictory situations remain explicitly visible to the user.

@@ -40,100 +40,124 @@ No web search or secondary external policy documents are used.
 
 ---
 
-## Installation & Setup
+## Installation & Setup Step-by-Step
 
-1. **Clone the Repository** and navigate to the project directory:
-   ```bash
-   git clone https://github.com/Amanraj-S/The-Grounded-Answer.git
-   cd The-Grounded-Answer
-   ```
+Follow these steps to set up and run the system:
 
-2. **Create & Activate Virtual Environment**:
-   ```bash
-   # Windows
-   python -m venv .venv
-   .venv\Scripts\activate
+### 1. Clone Repository & Navigate to Directory
+```bash
+git clone https://github.com/Amanraj-S/The-Grounded-Answer.git
+cd The-Grounded-Answer
+```
 
-   # Linux/macOS
-   python3 -m venv .venv
-   source .venv/bin/activate
-   ```
+### 2. Create & Activate Virtual Environment
+```bash
+# On Windows (PowerShell):
+python -m venv .venv
+.venv\Scripts\activate
 
-3. **Install Dependencies**:
-   ```bash
-   pip install -r requirements.txt
-   ```
+# On Linux / macOS:
+python3 -m venv .venv
+source .venv/bin/activate
+```
 
-4. **Build the FAISS Vector Index**:
-   ```bash
-   python -m src.retrieval.index
-   ```
-   *(This parses `data/policy-manual.md` and generates vector index files in `index/policy.index` and `index/metadata.json`)*.
+### 3. Install Dependencies
+```bash
+pip install -r requirements.txt
+```
+
+### 4. Build FAISS Vector Index (Optional / Verification)
+The pre-built vector index is included in `index/`. To rebuild it from scratch at any time:
+```bash
+python -m src.retrieval.index
+```
+*(Parses `data/policy-manual.md` and generates FAISS index files in `index/policy.index` and `index/metadata.json`)*.
 
 ---
 
-## Usage
+## How Evaluators Can Run & Ask Custom Questions
 
-### 1. Interactive CLI Application
+Evaluators can test the system using automated evaluation benchmarks, demonstration scenarios, the interactive CLI prompt, or the programmatic Python API.
 
-Run the date-aware policy CLI pipeline:
+---
 
+### Option A: Automated Evaluation Benchmark & Demo Suites 
+
+1. **Run 10-Question Evaluation Benchmark (10/10 Pass Rate)**:
+   ```bash
+   python evaluation/run_evaluation.py
+   ```
+   *(Executes all 10 evaluation benchmark questions, prints detailed status and clause citations in the terminal, and automatically generates [`evaluation/results.md`](evaluation/results.md))*.
+
+2. **Run Automated Demonstration Suite (8 Core Scenarios)**:
+   ```bash
+   python demo.py
+   ```
+   *(Executes 8 core demonstration scenarios covering answer grounding, missing dates, policy contradictions, apparent gaps, pre/post amendment date routing, and explicit refusals)*.
+
+3. **Run Automated Unit Test Suite (24 Pytest Cases)**:
+   ```bash
+   pytest
+   ```
+
+---
+
+### Option B: Interactive Terminal CLI (Ask Custom Policy Questions)
+
+Evaluators can ask custom input questions directly in an interactive terminal prompt:
+
+#### 1. Launch the interactive CLI pipeline:
 ```bash
 python -m src.pipeline.date_aware_pipeline
 ```
 
-**Sample Interaction**:
-```text
-Ask a policy question: My income changed on 10 March 2026. How long do I have to report it?
+#### 2. How to ask a question in CLI:
+- When the terminal displays:
+  ```text
+  ======================================================================
+  GROUNDED ANSWER — DATE-AWARE POLICY PIPELINE
+  ======================================================================
 
-----------------------------------------
-QUESTION INFORMATION
-----------------------------------------
-Topic: reporting_change
-Change date: 2026-03-10
-Determination date: None
+  Ask a policy question (or press Enter to exit):
+  ```
+- Type **ANY custom policy question**, for example:
+  - `"My income changed on 10 March 2026. How long do I have to report it?"`
+  - `"The Department made my determination on 5 March 2026. What is the monthly income threshold for a household of 3?"`
+  - `"How long do I have to report a change in income?"`
+  - `"Can I apply for a housing loan through the Department?"`
+- Press `Enter`.
 
-========================================
-FINAL ANSWER
-========================================
-According to the applicable policy provision:
+#### 3. Output displayed in terminal:
+- **Question Information**: Detected topic, change date, determination date.
+- **Decision Status & Grounded Answer / Refusal**: Verbatim policy text or clear refusal explanation with next steps.
+- **Citations**: Exact clause citations (§X.Y.Z), source document, version, and evidence score.
 
-A recipient must report any change in household composition, income, address, or the circumstances of any household member within 14 calendar days of the change occurring...
+---
 
-========================================
-CITATIONS
-========================================
-§4.3.2
-Source: Amendment No. 2026-01.md
-Version: amended
-Evidence score: 0.7245
+### Option C: Programmatic Python API
+
+Evaluators can test arbitrary questions programmatically in Python code:
+
+```python
+from src.pipeline.date_aware_pipeline import build_pipeline, process_question
+
+# 1. Initialize engine components
+components = build_pipeline()
+
+# 2. Pass ANY custom policy question
+result = process_question(
+    question="The Department made my determination on 5 March 2026. What is the monthly income threshold for a household of 3?",
+    components=components
+)
+
+# 3. Output results
+print("Status:", result["status"])
+print("Topic:", result["topic"])
+print("Change Date:", result["change_date"])
+print("Determination Date:", result["determination_date"])
+print("Answer:\n", result["answer"])
+print("Citations:", result["citations"])
 ```
-
-### 2. Comprehensive Demo Suite
-
-Run all 8 core test scenarios (Covered, Not Covered, Apparent Gap, Contradiction, Pre-March Date, Post-March Date, Missing Date, Unrelated Query) in one command:
-
-```bash
-python demo.py
-```
-
-### 3. Running Unit Tests
-
-Execute the unit test suite:
-
-```bash
-pytest
-```
-
-### 4. Running the 10-Question Evaluation Suite
-
-Run the automated evaluation benchmark suite:
-
-```bash
-python evaluation/run_evaluation.py
-```
-
-Results are printed to the console and automatically written to [`evaluation/results.md`](evaluation/results.md).
 
 ---
 
@@ -164,12 +188,25 @@ Amendment No. 2026-01 introduced date-sensitive policy rules taking effect on **
 
 ---
 
-## Repository Deliverables
+## Repository Structure & Deliverables
 
-* `src/`: Modular codebase (ingestion, retrieval, policy versioning, evidence evaluation, answer generation, pipeline).
-* `data/`: Authoritative policy manual and Amendment No. 2026-01 markdown text.
-* `evaluation/`: 10-question evaluation benchmark runner and generated results report.
-* `tests/`: 24 pytest unit tests covering date extraction, amendment parsing, contradiction detection, and effective policy resolution.
-* `demo.py`: Automated demonstration script for all core scenarios.
-* `DECISIONS.md`: Architectural decisions and refusal boundary documentation.
+* `src/`: Core production engine:
+  * `src/ingestion/parser.py`: Policy manual text parser.
+  * `src/policy/amendment_parser.py`: Amendment No. 2026-01 parser.
+  * `src/policy/date_extractor.py`: Contextual date extraction module.
+  * `src/policy/date_requirement.py`: Date requirement safety gate.
+  * `src/policy/versioning.py`: Effective policy version routing.
+  * `src/policy/effective_policy.py`: Provision text overlay resolver.
+  * `src/retrieval/index.py`: Vector index builder.
+  * `src/retrieval/retriever.py`: Dense vector retriever & FAISS search.
+  * `src/retrieval/date_aware_retriever.py`: Date-aware candidate retrieval & version overlay.
+  * `src/evidence/evaluator.py`: Multi-stage evidence relevance & concept verification.
+  * `src/evidence/contradiction.py`: Contradiction & conflict detector.
+  * `src/answer/generator.py`: Grounded answer generator & citation builder.
+  * `src/pipeline/date_aware_pipeline.py`: Main entry point (pipeline runner & interactive CLI).
+* `data/`: Policy Manual and Amendment No. 2026-01 markdown text.
+* `evaluation/`: 10-question evaluation benchmark suite and generated results report.
+* `tests/`: 24 unit tests covering date extraction, amendment parsing, contradiction detection, and effective policy resolution.
+* `demo.py`: Automated demonstration script for core scenarios.
+* `DECISIONS.md`: Architectural decisions & technical rationale document.
 * `AI-USAGE.md`: Full AI disclosure and development methodology record.

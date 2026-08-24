@@ -1,51 +1,64 @@
 # AI Usage Disclosure & Assistance Log
 
 **Grounded Answer — Calder County Household Support Program**
-**Brite Spark 2026 — Problem 1**
 
-This document provides a transparent record of AI assistant usage during the architectural design, implementation, testing, and documentation of the Grounded Answer project.
+**Brite Spark 2026 — Problem 1: The Grounded Answer**
 
----
-
-## 1. Overview of AI Integration
-
-An AI coding assistant (Gemini / Antigravity pair-programming agent) was utilized as an agentic pair-programmer during the development of this repository. AI assistance was used for rapid prototyping, RegEx pattern formulation, boilerplate creation, unit test generation, and audit compliance verification.
-
-All AI-generated code and logic underwent strict human inspection, empirical testing via `pytest`, and validation against the 10-question evaluation benchmark suite.
+This document provides a transparent record of **ChatGPT** assistance during the architectural design, implementation, testing, debugging, and documentation of the Grounded Answer project.
 
 ---
 
-## 2. Specific AI Usage by Component
+## 1. Overview of AI Assistance
 
-| Component | AI Role | Human Verification & Engineering |
+**ChatGPT** was used exclusively as a development and pair-programming assistant during the implementation of this project.
+
+ChatGPT assistance was utilized for:
+
+- Rapid prototyping of Python modules and components
+- Software design, code modularity, and structure
+- Regular expression pattern formulation (date extraction, clause citation parsing)
+- Boilerplate code generation
+- Debugging and error traceback analysis
+- Unit test suite generation (`pytest`)
+- Evaluation benchmark suite development
+- Technical documentation drafting (`README.md`, `DECISIONS.md`)
+- Reviewing edge cases and boundary conditions
+
+ChatGPT-generated code snippets were not treated as authoritative policy logic. All policy rules, effective date boundaries, evidence thresholds, and refusal mechanics were strictly grounded in and verified against `data/policy-manual.md` and `data/Amendment No. 2026-01.md`.
+
+All generated code was thoroughly reviewed, modified, refactored, and validated by the developer.
+
+---
+
+## 2. AI Usage by Component
+
+| Component | ChatGPT Assistance | Human Verification & Engineering |
 |---|---|---|
-| **Policy Ingestion (`src/ingestion/parser.py`)** | Generated initial markdown RegEx parsing patterns for `**X.Y.Z**` provision identifiers. | Verified provision boundaries against all 12 Parts of `data/policy-manual.md` to ensure zero lost text. |
-| **Amendment Parser (`src/policy/amendment_parser.py`)** | Drafted RegEx patterns for text substitutions, table replacements, and section insertions. | Tested parser on `data/Amendment No. 2026-01.md` and added markdown cleaning logic. |
-| **Vector Retrieval (`src/retrieval/`)** | Assisted with FAISS `IndexFlatIP` setup and `all-MiniLM-L6-v2` embedding integration. | Tuned candidate pool sizes (`candidate_k=15`) and calibrated concept ranking boosts. |
-| **Date Extraction (`src/policy/date_extractor.py`)** | Formulated contextual RegEx patterns for change dates and determination dates. | Added month parsing dictionaries and invalid date error handling (e.g. Feb 31 protection). |
-| **Date-Aware Routing (`src/policy/versioning.py`)** | Implemented version routing logic matching Amendment No. 2026-01 Paragraph 5 transitional rules. | Verified effective date boundary (`2026-03-01`) for pre-amendment vs post-amendment claims. |
-| **Contradiction Detection (`src/evidence/contradiction.py`)** | Drafted RegEx extraction for days (`\d+ calendar days`) and monetary amounts. | Designed non-hardcoded pair-comparison logic to detect §4.3.2 vs §9.1.4 conflict while avoiding false positives across different policy concepts. |
-| **Evidence Evaluator (`src/evidence/evaluator.py`)** | Generated initial keyword stop-word sets and concept mapping dictionaries. | Calibrated `minimum_score` (0.45) and `strong_score` (0.50) thresholds; added direct concept validation to prevent Apparent Gap false positives. |
-| **Unit Test Suite (`tests/`)** | Drafted initial pytest test cases for amendment parsing, date extraction, and contradiction handling. | Expanded test suite to 24 passing tests covering all edge cases. |
-| **Evaluation Suite (`evaluation/`)** | Assisted in drafting `run_evaluation.py` and markdown report writer. | Verified evaluation correctness on all 10 policy benchmark questions. |
+| **Policy Ingestion (`src/ingestion/parser.py`)** | Assisted with Markdown parsing patterns and provision identification. | Verified provision boundaries against `data/policy-manual.md` and ensured policy text was preserved correctly. |
+| **Amendment Parser (`src/policy/amendment_parser.py`)** | Assisted with regular expressions for amendment substitutions, table replacements, and insertions. | Tested parsing against `data/Amendment No. 2026-01.md` and verified the resulting amendment structures. |
+| **Vector Retrieval (`src/retrieval/`)** | Assisted with FAISS integration and embedding implementation. | Verified retrieval behaviour, ranking, candidate selection, and relevance against actual policy provisions. |
+| **Date Extraction (`src/policy/date_extractor.py`)** | Assisted with contextual date-extraction regular expressions. | Verified change-date and determination-date extraction and invalid-date handling. |
+| **Date Requirement (`src/policy/date_requirement.py`)** | Assisted with the structure of date-sensitive safety checks. | Verified which policy topics require a change date or determination date. |
+| **Policy Versioning (`src/policy/versioning.py`)** | Assisted with original-versus-amended policy routing. | Verified the 1 March 2026 effective boundary and transitional behaviour. |
+| **Effective Policy Resolver (`src/policy/effective_policy.py`)** | Assisted with the structure for applying amendments to original provisions. | Verified historical and amended provision selection. |
+| **Date-Aware Retrieval (`src/retrieval/date_aware_retriever.py`)** | Assisted with combining retrieval and effective-policy resolution. | Verified that retrieved provisions are resolved according to the relevant date. |
+| **Evidence Evaluator (`src/evidence/evaluator.py`)** | Assisted with relevance thresholds, keyword checks, and concept validation. | Calibrated thresholds and verified refusal behaviour for unsupported questions. |
+| **Contradiction Detector (`src/evidence/contradiction.py`)** | Assisted with numeric pattern extraction and contradiction-detection structure. | Verified detection of conflicting policy requirements without relying on a single hard-coded benchmark answer. |
+| **Answer Generator (`src/answer/generator.py`)** | Assisted with response formatting and citation presentation. | Verified that responses remain grounded in retrieved policy text. |
+| **Pipeline (`src/pipeline/date_aware_pipeline.py`)** | Assisted with orchestration and integration of components. | Tested the complete production pipeline using custom questions and benchmark scenarios. |
+| **Unit Tests (`tests/`)** | Assisted with drafting pytest cases and edge-case scenarios. | Tested the complete suite against the implemented behaviour. |
+| **Evaluation Suite (`evaluation/`)** | Assisted with evaluation runner structure and result reporting. | Verified the benchmark against the production engine and confirmed the final 10/10 result. |
+| **Demo Suite (`demo.py`)** | Assisted with demonstration scenario structure and output formatting. | Verified all eight demonstration scenarios. |
+| **Documentation** | Assisted with drafting and organizing technical documentation. | Reviewed documentation to ensure it accurately reflects the implemented repository. |
 
 ---
 
-## 3. Prompting Strategies & Workflow
+## 3. Policy Grounding and AI Limitations
 
-1. **Iterative Component-Driven Prompts**:
-   * Pipeline components were requested individually (Ingestion $\to$ Indexing $\to$ Retrieval $\to$ Refusal Logic $\to$ Contradiction Handling $\to$ Date Awareness $\to$ Pipeline Orchestration).
-2. **Empirical Grounding**:
-   * Instructions strictly prohibited LLM hallucination or text generation without verbatim corpus backing.
-   * Required that answers format exact policy text verbatim.
-3. **Automated Verification Loops**:
-   * Every component addition was immediately followed by running `pytest` and checking test outputs.
+A core design principle of this project is that ChatGPT was **never** used as a live policy generator or policy truth source:
 
----
-
-## 4. Verification & Quality Control
-
-* **Code Review**: Every line of generated Python code was inspected for safety, clarity, type annotations, and compliance with guidelines.
-* **Test Verification**: 24/24 unit tests pass cleanly under `pytest`.
-* **Benchmark Evaluation**: 10/10 evaluation benchmark cases pass with 100% accuracy in `evaluation/results.md`.
-* **Real-World Audit**: Executed all 8 required real-world scenarios via `demo.py` to confirm robust behavior across normal, refusal, gap, contradiction, date-aware, and out-of-domain queries.
+1. **No Live Generative Policy Invention**: The production system executes offline using local FAISS embeddings and deterministic Python logic.
+2. **Grounding Priority**: All policy answers are pulled directly from the authoritative corpus files:
+   - `data/policy-manual.md`
+   - `data/Amendment No. 2026-01.md`
+3. **Refusal Mechanism**: When policy coverage is insufficient, missing required dates, or contradictory, the system explicitly refuses to answer rather than relying on LLM completion/hallucination.
